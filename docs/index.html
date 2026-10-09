@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>月次データ照合チェック（デモ）</title>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: system-ui, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; margin: 0; background: #f4f6f8; color: #222; }
+  header { background: #1a5276; color: #fff; padding: 20px 16px; }
+  header h1 { margin: 0 0 8px; font-size: 1.4rem; }
+  header p { margin: 4px 0 0; font-size: 0.9rem; }
+  main { max-width: 1024px; margin: 0 auto; padding: 16px; }
+  .cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 16px 0; }
+  .card { background: #fff; border-radius: 8px; padding: 10px 6px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .card .n { font-size: 1.5rem; font-weight: bold; }
+  .card .l { font-size: 0.75rem; color: #555; white-space: nowrap; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; background: #fff; padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+  .controls label { font-size: 0.9rem; white-space: nowrap; }
+  .controls select { font-size: 0.9rem; padding: 4px 8px; }
+  .controls button { font-size: 0.9rem; padding: 6px 14px; cursor: pointer; }
+  .table-wrap { overflow-x: auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 0.85rem; }
+  th, td { border-bottom: 1px solid #e0e0e0; padding: 8px 10px; text-align: left; word-break: keep-all; white-space: nowrap; }
+  td.wrap { white-space: normal; word-break: keep-all; min-width: 10em; }
+  th { background: #eaf2f8; }
+  .tag { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.8rem; white-space: nowrap; }
+  .tag.new { background: #d5f5e3; color: #1e8449; }
+  .tag.mod { background: #fdebd0; color: #935116; }
+  .tag.same { background: #eaf2f8; color: #1a5276; }
+  .tag.end { background: #fadbd8; color: #943126; }
+  .warn { color: #b03a2e; font-weight: bold; white-space: nowrap; }
+  footer { max-width: 1024px; margin: 0 auto; padding: 8px 16px 32px; font-size: 0.8rem; color: #555; }
+  @media (max-width: 640px) {
+    .cards { grid-template-columns: repeat(3, 1fr); }
+    header h1 { font-size: 1.15rem; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>月次データ照合チェック（デモ）</h1>
+  <p>今月の公開データ（架空の見本12件）と管理中のデータ（架空の見本10件）を突き合わせ、</p>
+  <p>新規・変更・継続・終了候補に分けて表示します。掲載データはすべて架空のものです。</p>
+</header>
+<main>
+  <div class="cards" id="summary"></div>
+  <div class="controls">
+    <label>区分で絞り込む
+      <select id="filter">
+        <option value="all">すべて表示</option>
+        <option value="新規">新規</option>
+        <option value="変更">変更</option>
+        <option value="継続">継続</option>
+        <option value="終了候補">終了候補</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="onlyWarn"> 要確認のみ表示</label>
+    <button id="csvBtn" type="button">結果をCSVで保存</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>機関コード</th><th>名称</th><th>区分</th><th>変わった項目</th><th>確認</th><th>備考</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+<footer>
+  <p>この画面の分類・備考は、機関コードの一致と項目ごとの比較による機械的な照合結果です。最終判断は担当者が行います。</p>
+</footer>
+<script src="match.js"></script>
+<script>
+"use strict";
+// 画面表示用の架空データ（data/existing.json・data/monthly.json と同じ内容）
+const EXISTING = [
+  { "code": "F-0001", "name": "ひかり内科クリニック", "address": "青空県ひかり市朝日町1-2-3", "tel": "010-1111-0001", "departments": ["内科"], "beds": 0 },
+  { "code": "F-0002", "name": "みどり台小児科", "address": "青空県みどり市中央2-4-6", "tel": "010-1111-0002", "departments": ["小児科"], "beds": 0 },
+  { "code": "F-0003", "name": "さくら総合医院", "address": "青空県さくら市本町3-1-1", "tel": "010-1111-0003", "departments": ["内科", "外科"], "beds": 19 },
+  { "code": "F-0004", "name": "かぜの丘整形外科", "address": "青空県かぜ市丘の上4-5-6", "tel": "010-1111-0004", "departments": ["整形外科"], "beds": 0 },
+  { "code": "F-0005", "name": "ほしぞら眼科", "address": "青空県ほし市星見7-8-9", "tel": "010-1111-0005", "departments": ["眼科"], "beds": 0 },
+  { "code": "F-0006", "name": "なのはな産婦人科", "address": "青空県はな市菜の花1-1-1", "tel": "010-1111-0006", "departments": ["産婦人科"], "beds": 12 },
+  { "code": "F-0007", "name": "おおぞら歯科", "address": "青空県そら市大空2-2-2", "tel": "010-1111-0007", "departments": ["歯科"], "beds": 0 },
+  { "code": "F-0008", "name": "もりの耳鼻科クリニック", "address": "青空県もり市林3-3-3", "tel": "010-1111-0008", "departments": ["耳鼻咽喉科"], "beds": 0 },
+  { "code": "F-0009", "name": "たいよう皮膚科", "address": "青空県たい市陽向4-4-4", "tel": "010-1111-0009", "departments": ["皮膚科"], "beds": 0 },
+  { "code": "F-0010", "name": "かわら版リハビリ医院", "address": "青空県かわ市瓦5-5-5", "tel": "010-1111-0010", "departments": ["リハビリテーション科"], "beds": 30 }
+];
+const MONTHLY = [
+  { "code": "F-0001", "name": "ひかり内科クリニック", "address": "青空県ひかり市朝日町1-2-3", "tel": "010-1111-0001", "departments": ["内科"], "beds": 0 },
+  { "code": "F-0002", "name": "みどり台小児科", "address": "青空県みどり市中央2-4-6", "tel": "010-1111-0002", "departments": ["小児科", "アレルギー科"], "beds": 0 },
+  { "code": "F-0003", "name": "さくら総合医院", "address": "青空県さくら市本町3-1-1", "tel": "010-1111-0003", "departments": ["内科", "外科"], "beds": 19 },
+  { "code": "F-0004", "name": "かぜの丘整形外科", "address": "青空県かぜ市丘の上4-5-6", "tel": "010-9999-0004", "departments": ["整形外科"], "beds": 0 },
+  { "code": "F-0005", "name": "ほしぞら眼科", "address": "青空県ほし市星見7-8-9", "tel": "010-1111-0005", "departments": ["眼科"], "beds": 0 },
+  { "code": "F-0006", "name": "なのはな産婦人科", "address": "青空県はな市菜の花1-1-1", "tel": "010-1111-0006", "departments": ["産婦人科"], "beds": 12 },
+  { "code": "F-0007", "name": "おおぞら歯科", "address": "青空県そら市大空2-2-2", "tel": "010-1111-0007", "departments": ["歯科"], "beds": 0 },
+  { "code": "F-0008", "name": "もりの耳鼻科クリニック", "address": "青空県もり市林3-3-3", "tel": "010-1111-0008", "departments": ["耳鼻咽喉科"], "beds": 0 },
+  { "code": "F-0011", "name": "あおぞら心療内科", "address": "青空県あお市空6-6-6", "tel": "010-1111-0011", "departments": ["心療内科"], "beds": 0 },
+  { "code": "F-0012", "name": "つきよみ漢方クリニック", "address": "青空県つき市夜見7-7-7", "tel": "010-1111-0012", "departments": ["漢方内科"], "beds": 0 },
+  { "code": "F-0013", "name": "", "address": "青空県ゆき市雪見8-8-8", "tel": "電話番号不明", "departments": [], "beds": -1 },
+  { "code": "F-0014", "name": "にじいろファミリー医院", "address": "青空県にじ市虹8-1-2", "tel": "010-1111-0014", "departments": ["内科", "小児科"], "beds": 5 }
+];
+const FIELD_LABEL = { name: "名称", address: "所在地", tel: "電話番号", departments: "診療科", beds: "病床数" };
+
+const RESULTS = DataMatch.matchRecords(EXISTING, MONTHLY);
+const SUMMARY = DataMatch.summarize(RESULTS);
+
+function tagClass(t) {
+  return t === "新規" ? "new" : t === "変更" ? "mod" : t === "継続" ? "same" : "end";
+}
+
+function renderSummary() {
+  const items = [
+    ["全件", SUMMARY.total], ["新規", SUMMARY.新規], ["変更", SUMMARY.変更],
+    ["継続", SUMMARY.継続], ["終了候補", SUMMARY.終了候補], ["要確認", SUMMARY.要確認]
+  ];
+  document.getElementById("summary").innerHTML = items.map(([l, n]) =>
+    `<div class="card"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+}
+
+function renderRows() {
+  const f = document.getElementById("filter").value;
+  const onlyWarn = document.getElementById("onlyWarn").checked;
+  const body = document.getElementById("rows");
+  body.innerHTML = RESULTS
+    .filter((r) => (f === "all" || r.updateType === f) && (!onlyWarn || r.needsReview))
+    .map((r) => {
+      const changed = r.changedFields.map((x) => FIELD_LABEL[x] || x).join("、") || "—";
+      const warn = r.needsReview ? '<span class="warn">要確認</span>' : "—";
+      const note = r.reviewReasons.join(" / ") || "—";
+      const name = r.record.name || "（名称なし）";
+      return `<tr><td>${r.code}</td><td class="wrap">${name}</td>` +
+        `<td><span class="tag ${tagClass(r.updateType)}">${r.updateType}</span></td>` +
+        `<td class="wrap">${changed}</td><td>${warn}</td><td class="wrap">${note}</td></tr>`;
+    }).join("");
+}
+
+function downloadCsv() {
+  const rows = DataMatch.toOutputRows(RESULTS);
+  const head = ["code", "name", "address", "tel", "departments", "updateType", "changedFields", "needsReview", "note"];
+  const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
+  const csv = "\uFEFF" + [head.join(","), ...rows.map((r) => head.map((h) => esc(r[h])).join(","))].join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = "match-result.csv";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+document.getElementById("filter").addEventListener("change", renderRows);
+document.getElementById("onlyWarn").addEventListener("change", renderRows);
+document.getElementById("csvBtn").addEventListener("click", downloadCsv);
+renderSummary();
+renderRows();
+</script>
+</body>
+</html>

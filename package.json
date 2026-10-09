@@ -1,0 +1,1 @@
+{"description": "Monthly public-data vs managed-data matching POC (fictional data only)", "license": "UNLICENSED", "name": "data-maintenance-match-poc", "private": true, "scripts": {"test": "node --test test/"}, "version": "0.1.0"}
